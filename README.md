@@ -1,2 +1,3 @@
-# ootle-payment-gateway
-Payment gateway for the Ootle network
+# Ootle Payment Processor
+
+Payment processor for the Ootle network

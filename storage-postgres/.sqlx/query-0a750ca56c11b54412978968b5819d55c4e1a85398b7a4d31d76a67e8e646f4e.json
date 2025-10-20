@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE job_queue SET status = $1, execute_time_ms = $2, updated_at = now() WHERE id = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0a750ca56c11b54412978968b5819d55c4e1a85398b7a4d31d76a67e8e646f4e"
+}

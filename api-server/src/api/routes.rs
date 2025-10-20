@@ -1,0 +1,27 @@
+// Copyright 2025 The Tari Project
+// SPDX-License-Identifier: BSD-3-Clause
+
+use crate::api::context::HandlerContext;
+use crate::api::handlers;
+use crate::startup::App;
+use axum::{routing::get, Extension, Router};
+use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer};
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
+
+const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
+
+#[derive(OpenApi)]
+#[openapi(paths(handlers::misc::version, handlers::misc::health, handlers::payment::create))]
+pub struct ApiDoc;
+
+pub fn create_router(app: App) -> Router {
+    Router::new()
+        .route("/version", get(handlers::misc::version))
+        .route("/health", get(handlers::misc::health))
+        .route("/payments", axum::routing::post(handlers::payment::create))
+        .layer(Extension(HandlerContext::new(app)))
+        .layer(CorsLayer::permissive())
+        .layer(RequestBodyLimitLayer::new(REQUEST_BODY_LIMIT))
+        .merge(SwaggerUi::new("/swagger-ui").url("/openapi.json", ApiDoc::openapi()))
+}

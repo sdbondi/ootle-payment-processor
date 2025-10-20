@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT * FROM job_queue WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "task",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "payload",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "execute_time_ms",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a69c4ddefbbe6a26c84bfdc824d9e349f5fd06f0f71512850e5b6f5714089cee"
+}
