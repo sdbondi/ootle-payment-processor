@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id FROM job_queue WHERE status = 'Pending' AND scheduled_at <= now() ORDER BY priority DESC, created_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7ddca7a824dca898a82a911cc528767eaee81054d81f5c83f1e5a1ff3ba86c24"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE job_queue SET status = 'Failed', failure_reason = $1, updated_at = CURRENT_TIMESTAMP WHERE uuid = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "e6cf7d29bc8c7a5cbe1252be9d24964b63c1cdf67089c8016f7e5243b4f40a87"
+}

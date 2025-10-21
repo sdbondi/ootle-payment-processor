@@ -1,0 +1,45 @@
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+authors = ["The Tari Development Community"]
+repository = "https://github.com/tari-project/tari-ootle"
+license = "BSD-3-Clause"
+
+[workspace]
+members = ["api-server", "storage-postgres", "storage-sqlite", "storage"]
+resolver = "3"
+
+[workspace.dependencies]
+ootle-payment-processor-storage = { path = "storage" }
+ootle-payment-processor-storage-postgres = { path = "storage-postgres" }
+ootle-payment-processor-storage-sqlite = { path = "storage-sqlite" }
+
+# Ootle Dependencies
+#tari_ootle_wallet_sdk = { git = "https://github.com/tari-project/tari-ootle.git", branch = "development" }
+#tari_ootle_wallet_sdk_services = { git = "https://github.com/tari-project/tari-ootle.git", branch = "development", features = ["indexer_client"] }
+#tari_ootle_wallet_storage_sqlite = { git = "https://github.com/tari-project/tari-ootle.git", branch = "development" }
+#tari_template_lib_types = { git = "https://github.com/tari-project/tari-ootle.git", branch = "development" }
+#tari_ootle_common_types = { git = "https://github.com/tari-project/tari-ootle.git", branch = "development" }
+#tari_engine_types = { git = "https://github.com/tari-project/tari-ootle.git", branch = "development" }
+#tari_transaction = { git = "https://github.com/tari-project/tari-ootle.git", branch = "development" }
+
+tari_ootle_wallet_sdk = { path = "../dan/crates/wallet/sdk" }
+tari_ootle_wallet_sdk_services = { path = "../dan/crates/wallet/sdk_services", features = ["indexer_client"] }
+tari_ootle_wallet_storage_sqlite = { path = "../dan/crates/wallet/storage_sqlite" }
+tari_template_lib_types = { path = "../dan/crates/template_lib_types" }
+tari_ootle_common_types = { path = "../dan/crates/common_types" }
+tari_engine_types = { path = "../dan/crates/engine_types" }
+tari_transaction = { path = "../dan/crates/transaction" }
+
+tari_crypto = "0.22.1"
+anyhow = "1.0"
+dotenvy = "0.15"
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+serde_json = "1.0"
+thiserror = "2.0"
+time = "0.3"
+uuid = { version = "1.18", features = ["v4"] }
+
+

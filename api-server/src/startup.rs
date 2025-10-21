@@ -1,0 +1,109 @@
+// Copyright 2025 The Tari Project
+// SPDX-License-Identifier: BSD-3-Clause
+
+use crate::cli::Cli;
+use crate::event::PaymentProcessorEvent;
+use crate::store::Store;
+use crate::wallet::Wallet;
+use crate::worker::TaskWorker;
+use anyhow::Context;
+use log::*;
+#[cfg(feature = "postgres-storage")]
+use ootle_payment_processor_storage_postgres::PostgresStore;
+#[cfg(feature = "sqlite-storage")]
+use ootle_payment_processor_storage_sqlite::SqliteStore;
+use std::time::Duration;
+use tari_ootle_common_types::optional::Optional;
+use tari_ootle_wallet_sdk::cipher_seed::CipherSeedRestore;
+use tari_ootle_wallet_sdk::constants::XTR;
+use tari_ootle_wallet_sdk::{WalletSdk, WalletSdkConfig};
+use tari_ootle_wallet_sdk_services::account_monitor::{AccountMonitor, AccountMonitorHandle};
+use tari_ootle_wallet_sdk_services::indexer_rest_api::IndexerRestApiNetworkInterface;
+use tari_ootle_wallet_sdk_services::notify::Notify;
+use tari_ootle_wallet_sdk_services::utxo_scanner::{StealthUtxoScannerWorker, UtxoRecovery};
+use tari_ootle_wallet_sdk_services::ShutdownSignal;
+use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
+
+#[cfg(not(any(feature = "sqlite-storage", feature = "postgres-storage")))]
+compile_error!("At least one storage backend feature must be enabled: sqlite-storage, postgres-storage");
+
+pub async fn init_app(cli: &Cli, shutdown: ShutdownSignal) -> anyhow::Result<App> {
+    let sdk_store = SqliteWalletStore::try_open(cli.sdk_store_path.as_ref())?;
+    sdk_store.run_migrations()?;
+    let indexer_interface = IndexerRestApiNetworkInterface::new(cli.indexer_api_url.clone());
+    let config = WalletSdkConfig {
+        network: cli.network,
+        // TODO: Figure out how better to secure this. Maybe os keyring is fine (then set this to None). For now, keeping this simple.
+        override_keyring_password: Some("ootle-wallet-sdk".into()),
+    };
+
+    let mut sdk = WalletSdk::initialize(sdk_store, indexer_interface, config)?;
+    sdk.initialize_cipher_seed(CipherSeedRestore::CreateNewIfRequired)?;
+
+    if !sdk.resources_api().exists(&XTR)? {
+        let resource = sdk
+            .substate_api()
+            .fetch_resource(XTR)
+            .await
+            .context("Failed to fetch XTR resource. This may indicate a problem with the indexer connection.")?;
+        sdk.resources_api().upsert_resource(&XTR, &resource)?;
+    }
+
+    let mut wallet = Wallet::new(sdk.clone());
+    let maybe_account = wallet.get_account_or_default(Some("payment-processor")).optional()?;
+    let account = maybe_account
+        .map(Ok)
+        .unwrap_or_else(|| wallet.create_account("payment-processor", true))?;
+    info!("💰️ 💰️ 💰️ 💰️ FUNDING ADDRESS: {} 💰️ 💰️ 💰️ 💰️", account.address());
+
+    let notify = Notify::new(1000);
+
+    let scanner = StealthUtxoScannerWorker::new(sdk.clone(), notify.clone());
+    let (stealth_scanner_join_handle, utxo_scanner_handle) = scanner.spawn();
+
+    let utxo_recovery_join_handle = {
+        let sdk = wallet.sdk().clone();
+        let notify_sub = utxo_scanner_handle.subscribe_notifications();
+        tokio::spawn(UtxoRecovery::new(sdk).run(notify_sub))
+    };
+
+    let (monitor, account_monitor_handle) = AccountMonitor::new(notify, sdk, utxo_scanner_handle, shutdown);
+    let account_monitor_join_handle = tokio::spawn(monitor.with_periodic_scan_interval(Duration::from_secs(20)).run());
+
+    let notify = Notify::new(1000);
+
+    #[cfg(feature = "postgres-storage")]
+    let store = PostgresStore::connect(&cli.connection_string).await?;
+
+    #[cfg(feature = "sqlite-storage")]
+    let store = SqliteStore::connect(&cli.connection_string).await?;
+
+    store.migrate().await?;
+
+    let handle = TaskWorker::new(store.clone(), wallet.clone(), notify.subscribe()).spawn();
+
+    Ok(App {
+        _account_monitor_handle: account_monitor_handle,
+        wallet,
+        store: Store::new(store),
+        notify,
+        task_worker_join_handle: handle,
+        stealth_scanner_join_handle,
+        utxo_recovery_join_handle,
+        account_monitor_join_handle,
+    })
+}
+
+pub(crate) struct App {
+    pub _account_monitor_handle: AccountMonitorHandle,
+    pub wallet: Wallet,
+    #[cfg(feature = "postgres-storage")]
+    pub store: Store<PostgresStore>,
+    #[cfg(feature = "sqlite-storage")]
+    pub store: Store<SqliteStore>,
+    pub notify: Notify<PaymentProcessorEvent>,
+    pub task_worker_join_handle: tokio::task::JoinHandle<()>,
+    pub stealth_scanner_join_handle: tokio::task::JoinHandle<anyhow::Result<()>>,
+    pub utxo_recovery_join_handle: tokio::task::JoinHandle<anyhow::Result<()>>,
+    pub account_monitor_join_handle: tokio::task::JoinHandle<anyhow::Result<()>>,
+}

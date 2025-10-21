@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE job_queue SET status = 'Completed', result = $1, execute_time_ms = $2, updated_at = now() WHERE id = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Jsonb",
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f765570c21b0e90f5e996beecb480121a3224b817278235f79e101995854b166"
+}

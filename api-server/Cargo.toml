@@ -1,0 +1,39 @@
+[package]
+name = "ootle-payment-api-server"
+version = "0.0.1"
+edition = "2024"
+
+[dependencies]
+ootle-payment-processor-storage = { workspace = true }
+ootle-payment-processor-storage-postgres = { workspace = true, optional = true }
+ootle-payment-processor-storage-sqlite = { workspace = true, optional = true }
+
+#tari_ootle_wallet_storage_sqlite = { workspace = true }
+tari_template_lib_types = { workspace = true }
+tari_ootle_wallet_sdk = { workspace = true }
+tari_ootle_wallet_sdk_services = { workspace = true, features = ["indexer_client"] }
+tari_ootle_wallet_storage_sqlite = { workspace = true }
+tari_ootle_common_types = { workspace = true }
+tari_engine_types = { workspace = true }
+tari_transaction = { workspace = true }
+
+anyhow = { workspace = true }
+env_logger = "0.11"
+axum = "0.8"
+clap = { version = "4.5", features = ["derive", "env"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tari_crypto = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+log = { workspace = true }
+futures-bounded = { version = "0.3.0", features = ["tokio"] }
+serde_json = { workspace = true }
+tower-http = { version = "0.6.6", features = ["cors", "limit"] }
+utoipa = "5.4.0"
+utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
+uuid = { workspace = true, features = ["v4", "serde"] }
+url = "2.5.7"
+
+[features]
+default = ["postgres-storage"]
+sqlite-storage = ["ootle-payment-processor-storage-sqlite"]
+postgres-storage = ["ootle-payment-processor-storage-postgres"]
