@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO job_queue (uuid, task, status, payload, attempts, priority) VALUES ($1, $2, $3, $4, $5, $6)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "3fd6e01a7e01704221be55e20422f36995035cdc2e668711fdbd6726c2faa2d5"
+}

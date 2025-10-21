@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT uuid FROM job_queue WHERE status = 'Pending' AND scheduled_at <= CURRENT_TIMESTAMP ORDER BY priority DESC, created_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "uuid",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "69c5886a6571354088fc66bf68048e499c6a7f89c25566c0ee713112ad704f01"
+}

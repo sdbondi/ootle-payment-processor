@@ -1,5 +1,5 @@
 [package]
-name = "ootle-payment-processor-storage-postgres"
+name = "ootle-payment-processor-storage-sqlite"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -16,4 +16,4 @@ serde_json = { workspace = true }
 [dependencies.sqlx]
 version = "0.8.6"
 default-features = false
-features = ["any", "runtime-tokio", "macros", "postgres", "migrate", "time", "json", "uuid"]
+features = ["any", "runtime-tokio", "macros", "sqlite", "migrate", "time", "json", "uuid"]

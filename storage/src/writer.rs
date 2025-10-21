@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::error::StorageError;
-use crate::models::{JobStatus, TaskType};
+use crate::models::{JobStatus, JobType};
 use crate::reader::ReadableStore;
 use std::time::Duration;
 
@@ -40,16 +40,32 @@ pub trait WriteableStore: ReadableStore {
 pub trait StoreWriteTransaction {
     fn enqueue_work(
         &mut self,
-        task: TaskType,
+        task: JobType,
+        priority: u32,
         data: Option<serde_json::Value>,
     ) -> impl Future<Output = Result<uuid::Uuid, StorageError>> + Send;
 
     fn set_job_status(
         &mut self,
         id: &uuid::Uuid,
-        execution_time: Duration,
         status: JobStatus,
     ) -> impl Future<Output = Result<(), StorageError>> + Send;
+    fn set_failure_reason(
+        &mut self,
+        id: &uuid::Uuid,
+        reason: String,
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+    fn set_completed_job_result(
+        &mut self,
+        id: &uuid::Uuid,
+        execution_time: Duration,
+        result: serde_json::Value,
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+    fn requeue_job(
+        &mut self,
+        id: &uuid::Uuid,
+        schedule: Duration,
+    ) -> impl Future<Output = Result<u32, StorageError>> + Send;
     fn delete_job(&mut self, id: &uuid::Uuid) -> impl Future<Output = Result<(), StorageError>> + Send;
     fn commit(self) -> impl Future<Output = Result<(), StorageError>> + Send;
     fn rollback(self) -> impl Future<Output = Result<(), StorageError>> + Send;

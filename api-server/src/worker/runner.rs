@@ -4,9 +4,9 @@
 use crate::event::PaymentProcessorEvent;
 use crate::wallet::Wallet;
 use crate::worker::context::JobContext;
-use crate::worker::jobs;
+use crate::worker::{jobs, JobResult};
 use log::*;
-use ootle_payment_processor_storage::models::{JobStatus, TaskType};
+use ootle_payment_processor_storage::models::{JobStatus, JobType};
 use ootle_payment_processor_storage::{
     AsReadable, ReadableStore, StoreReadTransaction, StoreWriteTransaction, WriteableStore,
 };
@@ -25,7 +25,7 @@ pub struct TaskWorker<TStore> {
     wallet: Wallet,
     notifications: broadcast::Receiver<PaymentProcessorEvent>,
     interval: tokio::time::Interval,
-    work_queue: futures_bounded::FuturesMap<uuid::Uuid, anyhow::Result<()>>,
+    work_queue: futures_bounded::FuturesMap<uuid::Uuid, anyhow::Result<JobResult>>,
     timers: HashMap<uuid::Uuid, Instant>,
 }
 
@@ -36,7 +36,7 @@ where
     for<'tx> TStore::WriteTransaction<'tx>: Send + AsReadable,
 {
     pub fn new(store: TStore, wallet: Wallet, notifications: broadcast::Receiver<PaymentProcessorEvent>) -> Self {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+        let mut interval = tokio::time::interval(Duration::from_secs(5));
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         Self {
             store,
@@ -86,7 +86,7 @@ where
                         match event {
                             PaymentProcessorEvent::TaskCreated { task_id } => {
                                 log::info!("👷 Worker received TaskCreated event for task_id: {}", task_id);
-                                self.process_new_task(task_id).await?;
+                                self.check_queue_for_more_jobs().await?;
                                 Ok(ControlFlow::Continue(()))
                             },
                         }
@@ -112,16 +112,6 @@ where
         self.work_queue.len() >= MAX_CONCURRENT_JOBS
     }
 
-    async fn process_new_task(&mut self, job_id: uuid::Uuid) -> anyhow::Result<()> {
-        if self.is_work_queue_full() {
-            log::warn!("👷 Work queue is full, deferring task {}", job_id);
-            return Ok(());
-        }
-
-        self.dispatch_job(job_id).await?;
-        Ok(())
-    }
-
     async fn dispatch_job(&mut self, job_id: uuid::Uuid) -> anyhow::Result<bool> {
         let job = {
             let mut tx = self.store.create_read_tx().await?;
@@ -142,20 +132,20 @@ where
         info!(
             "👷 Dispatching job: {} {} - queue: {}/{}",
             job.id,
-            job.task,
+            job.job_type,
             self.work_queue.len(),
             MAX_CONCURRENT_JOBS
         );
 
         // Implement job dispatching logic here
-        match job.task {
-            TaskType::ProcessPayment => {
+        match job.job_type {
+            JobType::ProcessPayment => {
                 let job_id = job.id;
-                let data = match serde_json::from_value(job.data) {
+                let data = match serde_json::from_value(job.data.clone()) {
                     Ok(data) => data,
                     Err(err) => {
                         log::error!("👷 Failed to deserialize job data for job {}: {}", job_id, err);
-                        set_job_status(&self.store, &job_id, Duration::from_secs(0), JobStatus::Invalid).await?;
+                        set_job_status(&self.store, &job_id, JobStatus::Invalid).await?;
                         return Ok(true); // Skip this job
                     },
                 };
@@ -163,16 +153,16 @@ where
                 self.timers.insert(job_id, Instant::now());
                 match self
                     .work_queue
-                    .try_push(job_id, jobs::send_payment::do_work(self.create_context(), job.id, data))
+                    .try_push(job_id, jobs::send_payment::do_work(self.create_context(), job, data))
                 {
                     Ok(_) => {
-                        set_job_status(&self.store, &job_id, Duration::from_secs(0), JobStatus::InProgress).await?;
+                        set_job_status(&self.store, &job_id, JobStatus::InProgress).await?;
                         log::info!("👷 Dispatched ProcessPayment job with ID: {}", job_id);
                         Ok(true)
                     },
                     Err(futures_bounded::PushError::Replaced(_)) => {
                         warn!("👷 Already processing job, this shouldn't happen {}", job_id);
-                        set_job_status(&self.store, &job_id, Duration::from_secs(0), JobStatus::InProgress).await?;
+                        set_job_status(&self.store, &job_id, JobStatus::InProgress).await?;
                         Ok(true)
                     },
                     Err(futures_bounded::PushError::BeyondCapacity(_)) => {
@@ -184,9 +174,8 @@ where
         }
     }
 
-    fn create_context(&self) -> JobContext<TStore> {
+    fn create_context(&self) -> JobContext {
         JobContext {
-            store: self.store.clone(),
             wallet: self.wallet.clone(),
         }
     }
@@ -194,19 +183,29 @@ where
     async fn handle_completed_task(
         &mut self,
         task_id: uuid::Uuid,
-        result: Result<anyhow::Result<()>, futures_bounded::Timeout>,
+        result: Result<anyhow::Result<JobResult>, futures_bounded::Timeout>,
     ) -> anyhow::Result<()> {
         let exec_time = self.timers.remove(&task_id).map(|t| t.elapsed()).unwrap_or_default();
         let mut tx = self.store.create_write_tx().await?;
         match result {
-            Ok(Ok(())) => {
+            Ok(Ok(JobResult::Completed { result })) => {
                 log::info!(
                     "👷 Task {} completed successfully ({}/{})",
                     task_id,
                     self.work_queue.len(),
                     MAX_CONCURRENT_JOBS
                 );
-                tx.set_job_status(&task_id, exec_time, JobStatus::Completed).await?;
+                tx.set_completed_job_result(&task_id, exec_time, result).await?;
+            },
+            Ok(Ok(JobResult::RetryIn { duration })) => {
+                let attempts = tx.requeue_job(&task_id, duration).await?;
+                log::info!(
+                    "👷 Task {} will be retried (attempt #{}) - ({}/{})",
+                    task_id,
+                    attempts,
+                    self.work_queue.len(),
+                    MAX_CONCURRENT_JOBS
+                );
             },
             Ok(Err(err)) => {
                 log::error!(
@@ -216,7 +215,7 @@ where
                     self.work_queue.len(),
                     MAX_CONCURRENT_JOBS
                 );
-                tx.set_job_status(&task_id, exec_time, JobStatus::Failed).await?;
+                tx.set_failure_reason(&task_id, err.to_string()).await?;
             },
             Err(_) => {
                 log::error!(
@@ -225,7 +224,7 @@ where
                     self.work_queue.len(),
                     MAX_CONCURRENT_JOBS
                 );
-                tx.set_job_status(&task_id, exec_time, JobStatus::TimedOut).await?;
+                tx.set_job_status(&task_id, JobStatus::TimedOut).await?;
             },
         }
 
@@ -267,11 +266,10 @@ where
 async fn set_job_status<TStore: WriteableStore>(
     store: &TStore,
     id: &uuid::Uuid,
-    execute_time: Duration,
     status: JobStatus,
 ) -> anyhow::Result<()> {
     let mut tx = store.create_write_tx().await?;
-    tx.set_job_status(id, execute_time, status).await?;
+    tx.set_job_status(id, status).await?;
     tx.commit().await?;
     Ok(())
 }

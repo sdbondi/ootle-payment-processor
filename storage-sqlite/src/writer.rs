@@ -1,64 +1,71 @@
 // Copyright 2025 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::store::PostgresStore;
-use crate::PostgresReadTransaction;
+use crate::store::SqliteStore;
+use crate::SqliteReadTransaction;
 use ootle_payment_processor_storage::models::{JobStatus, JobType};
 use ootle_payment_processor_storage::{AsReadable, StorageError, WriteableStore};
 use serde_json::Value;
 use sqlx::types::{uuid, Uuid};
-use sqlx::PgConnection;
+use sqlx::SqliteConnection;
 use std::time::Duration;
 
-impl WriteableStore for PostgresStore {
-    type WriteTransaction<'a> = PostgresWriteTransaction<'a>;
+impl WriteableStore for SqliteStore {
+    type WriteTransaction<'a> = SqliteWriteTransaction<'a>;
 
     async fn create_write_tx(&self) -> Result<Self::WriteTransaction<'_>, StorageError> {
         self.pool
             .begin()
             .await
             .map_err(|e| StorageError::DatabaseError { source: e.into() })
-            .map(|tx| PostgresReadTransaction { transaction: tx })
-            .map(|read_tx| PostgresWriteTransaction { transaction: read_tx })
+            .map(|tx| SqliteReadTransaction { transaction: tx })
+            .map(|read_tx| SqliteWriteTransaction { transaction: read_tx })
     }
 }
 
-pub struct PostgresWriteTransaction<'tx> {
-    transaction: PostgresReadTransaction<'tx>,
+pub struct SqliteWriteTransaction<'tx> {
+    transaction: SqliteReadTransaction<'tx>,
 }
 
-impl PostgresWriteTransaction<'_> {
-    fn conn(&mut self) -> &mut PgConnection {
+impl SqliteWriteTransaction<'_> {
+    fn conn(&mut self) -> &mut SqliteConnection {
         self.transaction.conn()
     }
 }
 
-impl ootle_payment_processor_storage::StoreWriteTransaction for PostgresWriteTransaction<'_> {
+impl ootle_payment_processor_storage::StoreWriteTransaction for SqliteWriteTransaction<'_> {
     async fn enqueue_work(
         &mut self,
         task: JobType,
         priority: u32,
         data: Option<serde_json::Value>,
     ) -> Result<uuid::Uuid, StorageError> {
-        let a = sqlx::query!(
-            "INSERT INTO job_queue (task, status, payload, attempts, priority) VALUES ($1, $2, $3, $4, $5) RETURNING id",
-            task.to_string(),
+        let uuid = uuid::Uuid::new_v4();
+        let uuid_str = uuid.to_string();
+        let task = task.to_string();
+        let priority = priority as i32;
+        sqlx::query!(
+            "INSERT INTO job_queue (uuid, task, status, payload, attempts, priority) VALUES ($1, $2, $3, $4, $5, $6)",
+            uuid_str,
+            task,
             "Pending",
             data,
             0i32,
-            priority as i32
+            priority,
         )
-        .fetch_one(self.conn())
+        .execute(self.conn())
         .await
         .map_err(|e| StorageError::DatabaseError { source: e.into() })?;
-        Ok(a.id)
+        Ok(uuid)
     }
 
     async fn set_job_status(&mut self, id: &Uuid, status: JobStatus) -> Result<(), StorageError> {
+        let id_str = id.to_string();
+        let status_str = status.as_str();
         sqlx::query!(
-            "UPDATE job_queue SET status = $1, updated_at = now() WHERE id = $2",
-            status.as_str(),
-            id
+            "UPDATE job_queue SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE uuid = $2",
+            status_str,
+            id_str
         )
         .execute(self.conn())
         .await
@@ -67,10 +74,11 @@ impl ootle_payment_processor_storage::StoreWriteTransaction for PostgresWriteTra
     }
 
     async fn set_failure_reason(&mut self, id: &Uuid, reason: String) -> Result<(), StorageError> {
+        let id_str = id.to_string();
         sqlx::query!(
-            "UPDATE job_queue SET status = 'Failed', failure_reason = $1, updated_at = now() WHERE id = $2",
+            "UPDATE job_queue SET status = 'Failed', failure_reason = $1, updated_at = CURRENT_TIMESTAMP WHERE uuid = $2",
             reason,
-            id
+            id_str
         )
         .execute(self.conn())
         .await
@@ -85,15 +93,17 @@ impl ootle_payment_processor_storage::StoreWriteTransaction for PostgresWriteTra
         execution_time: Duration,
         result: Value,
     ) -> Result<(), StorageError> {
+        let exec_ms = i64::try_from(execution_time.as_millis()).unwrap_or(i64::MAX);
+        let id_str = id.to_string();
         sqlx::query!(
-            "UPDATE job_queue SET status = 'Completed', result = $1, execute_time_ms = $2, updated_at = now() WHERE id = $3",
+            "UPDATE job_queue SET status = 'Completed', result = $1, execute_time_ms = $2, updated_at = CURRENT_TIMESTAMP WHERE uuid = $3",
             result,
-            i64::try_from(execution_time.as_millis()).unwrap_or(i64::MAX),
-            id
+            exec_ms,
+            id_str
         )
-        .execute(self.conn())
-        .await
-        .map_err(|e| StorageError::DatabaseError { source: e.into() })?;
+            .execute(self.conn())
+            .await
+            .map_err(|e| StorageError::DatabaseError { source: e.into() })?;
 
         Ok(())
     }
@@ -105,22 +115,24 @@ impl ootle_payment_processor_storage::StoreWriteTransaction for PostgresWriteTra
         } else {
             scheduled_at.as_secs() as f64
         };
+        let plus_secs = format!("+{} seconds", secs);
+        let id_str = id.to_string();
         let rec = sqlx::query!(
             "UPDATE job_queue \
                 SET \
                     attempts = attempts + 1, \
                     status = 'Pending', \
-                    scheduled_at = now() + make_interval(secs => $2), \
-                    updated_at = now() \
-                WHERE id = $1 RETURNING attempts",
-            id,
-            secs
+                    scheduled_at = DATETIME(CURRENT_TIMESTAMP, $2), \
+                    updated_at = CURRENT_TIMESTAMP \
+                WHERE uuid = $1 RETURNING attempts",
+            id_str,
+            plus_secs,
         )
         .fetch_one(self.conn())
         .await
         .map_err(|e| StorageError::DatabaseError { source: e.into() })?;
 
-        Ok(rec.attempts as u32)
+        Ok(u32::try_from(rec.attempts as u64).unwrap_or(u32::MAX))
     }
 
     async fn delete_job(&mut self, id: &Uuid) -> Result<(), StorageError> {
@@ -148,8 +160,8 @@ impl ootle_payment_processor_storage::StoreWriteTransaction for PostgresWriteTra
     }
 }
 
-impl<'tx> AsReadable for PostgresWriteTransaction<'tx> {
-    type Store = PostgresReadTransaction<'tx>;
+impl<'tx> AsReadable for SqliteWriteTransaction<'tx> {
+    type Store = SqliteReadTransaction<'tx>;
 
     fn as_readable(&mut self) -> &mut Self::Store {
         &mut self.transaction

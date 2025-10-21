@@ -31,6 +31,24 @@ pub async fn health(Extension(context): Extension<HandlerContext>) -> Json<HashM
         response.insert("status", "error".to_string());
         response.insert("worker_error", "Worker has stopped running".to_string());
     }
+    if !context.is_account_monitor_running() {
+        response.insert("status", "error".to_string());
+        response.insert(
+            "account_monitor_error",
+            "Account monitor has stopped running".to_string(),
+        );
+    }
+    if !context.is_utxo_scanner_running() {
+        response.insert("status", "error".to_string());
+        response.insert("utxo_scanner_error", "Utxo scanner has stopped running".to_string());
+    }
+    if !context.is_stealth_scanner_running() {
+        response.insert("status", "error".to_string());
+        response.insert(
+            "stealth_scanner_error",
+            "Stealth scanner has stopped running".to_string(),
+        );
+    }
 
     if response.is_empty() {
         response.insert("status", "ok".to_string());

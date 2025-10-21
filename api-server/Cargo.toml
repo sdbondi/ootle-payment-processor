@@ -5,7 +5,8 @@ edition = "2024"
 
 [dependencies]
 ootle-payment-processor-storage = { workspace = true }
-ootle-payment-processor-storage-postgres = { workspace = true }
+ootle-payment-processor-storage-postgres = { workspace = true, optional = true }
+ootle-payment-processor-storage-sqlite = { workspace = true, optional = true }
 
 #tari_ootle_wallet_storage_sqlite = { workspace = true }
 tari_template_lib_types = { workspace = true }
@@ -31,3 +32,8 @@ utoipa = "5.4.0"
 utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 uuid = { workspace = true, features = ["v4", "serde"] }
 url = "2.5.7"
+
+[features]
+default = ["postgres-storage"]
+sqlite-storage = ["ootle-payment-processor-storage-sqlite"]
+postgres-storage = ["ootle-payment-processor-storage-postgres"]

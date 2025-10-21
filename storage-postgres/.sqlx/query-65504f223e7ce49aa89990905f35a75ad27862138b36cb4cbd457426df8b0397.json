@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE job_queue SET attempts = attempts + 1, status = 'Pending', scheduled_at = now() + make_interval(secs => $2), updated_at = now() WHERE id = $1 RETURNING attempts",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "attempts",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Float8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "65504f223e7ce49aa89990905f35a75ad27862138b36cb4cbd457426df8b0397"
+}

@@ -3,14 +3,20 @@
 
 use std::fmt::Display;
 use std::str::FromStr;
+use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub struct Job {
     pub id: uuid::Uuid,
-    pub task: TaskType,
+    pub job_type: JobType,
+    pub execution_time: Duration,
     pub data: serde_json::Value,
     pub status: JobStatus,
     pub attempts: u32,
+    pub result: Option<serde_json::Value>,
+    pub failure_reason: Option<Box<str>>,
+    pub priority: u32,
+    pub updated_at: time::OffsetDateTime,
 }
 
 impl Job {
@@ -25,7 +31,7 @@ impl Job {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
 pub enum JobStatus {
     Pending,
     InProgress,
@@ -36,7 +42,7 @@ pub enum JobStatus {
 }
 
 impl JobStatus {
-    pub fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::Pending => "Pending",
             Self::InProgress => "InProgress",
@@ -63,24 +69,24 @@ impl FromStr for JobStatus {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum TaskType {
+#[derive(Debug, Clone, serde::Serialize)]
+pub enum JobType {
     ProcessPayment,
 }
 
-impl Display for TaskType {
+impl Display for JobType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TaskType::ProcessPayment => write!(f, "ProcessPayment"),
+            JobType::ProcessPayment => write!(f, "ProcessPayment"),
         }
     }
 }
 
-impl FromStr for TaskType {
+impl FromStr for JobType {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "ProcessPayment" => Ok(TaskType::ProcessPayment),
+            "ProcessPayment" => Ok(JobType::ProcessPayment),
             _ => Err(anyhow::anyhow!("Unknown task type: {}", s)),
         }
     }

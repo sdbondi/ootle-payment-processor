@@ -7,6 +7,7 @@ use ootle_payment_processor_storage::models::Job;
 use ootle_payment_processor_storage::{AsReadable, ReadableStore, StorageError};
 use sqlx::types::{uuid, Uuid};
 use sqlx::{Error, PgConnection};
+use std::time::Duration;
 
 impl ReadableStore for PostgresStore {
     type ReadTransaction<'tx> = PostgresReadTransaction<'tx>;
@@ -35,10 +36,12 @@ impl<'tx> PostgresReadTransaction<'tx> {
 
 impl ootle_payment_processor_storage::StoreReadTransaction for PostgresReadTransaction<'_> {
     async fn get_next_job_id(&mut self) -> Result<Option<uuid::Uuid>, StorageError> {
-        let result = sqlx::query!("SELECT id FROM job_queue WHERE status = 'Pending' ORDER BY id ASC",)
-            .fetch_optional(self.conn())
-            .await
-            .map_err(|e| StorageError::DatabaseError { source: e.into() })?;
+        let result = sqlx::query!(
+            "SELECT id FROM job_queue WHERE status = 'Pending' AND scheduled_at <= now() ORDER BY priority DESC, created_at ASC",
+        )
+        .fetch_optional(self.conn())
+        .await
+        .map_err(|e| StorageError::DatabaseError { source: e.into() })?;
 
         let Some(result) = result else {
             return Ok(None);
@@ -58,14 +61,19 @@ impl ootle_payment_processor_storage::StoreReadTransaction for PostgresReadTrans
 
         Ok(Some(Job {
             id: result.id,
-            task: result.task.parse().map_err(|e| PostgresStorageError::DecodeError {
+            job_type: result.task.parse().map_err(|e| PostgresStorageError::DecodeError {
                 source: anyhow::anyhow!("Failed to parse task: {}", e),
             })?,
             status: result.status.parse().map_err(|e| PostgresStorageError::DecodeError {
                 source: anyhow::anyhow!("Failed to parse status: {}", e),
             })?,
+            execution_time: Duration::from_millis(result.execute_time_ms as u64),
+            updated_at: result.updated_at,
             attempts: result.attempts as u32,
             data: result.payload,
+            failure_reason: result.failure_reason.map(|s| s.into_boxed_str()),
+            priority: result.priority as u32,
+            result: result.result,
         }))
     }
 }

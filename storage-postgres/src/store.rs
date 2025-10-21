@@ -11,7 +11,7 @@ pub struct PostgresStore {
 impl PostgresStore {
     pub async fn connect(connection_string: &str) -> Result<Self, PostgresStorageError> {
         let pool = sqlx::postgres::PgPoolOptions::new()
-            .max_connections(1)
+            .max_connections(20)
             .connect(connection_string)
             .await?;
         Ok(Self { pool })

@@ -3,7 +3,6 @@
 
 use crate::wallet::Wallet;
 
-pub struct JobContext<TStore> {
-    pub store: TStore,
+pub struct JobContext {
     pub wallet: Wallet,
 }

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE job_queue SET attempts = attempts + 1, status = 'Pending', scheduled_at = DATETIME(CURRENT_TIMESTAMP, $2), updated_at = CURRENT_TIMESTAMP WHERE uuid = $1 RETURNING attempts",
+  "describe": {
+    "columns": [
+      {
+        "name": "attempts",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0deed9859081fff362ad9dcf9cf2a9fed367e320c627e6cc10f3071f14a4c1fa"
+}

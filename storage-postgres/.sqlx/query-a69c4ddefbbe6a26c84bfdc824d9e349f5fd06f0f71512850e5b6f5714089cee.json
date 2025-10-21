@@ -35,11 +35,31 @@
       },
       {
         "ordinal": 6,
-        "name": "created_at",
+        "name": "scheduled_at",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 7,
+        "name": "result",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 8,
+        "name": "failure_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "priority",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -55,6 +75,10 @@
       false,
       false,
       false,
+      false,
+      false,
+      true,
+      true,
       false,
       false,
       false

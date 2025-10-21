@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE job_queue SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE uuid = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "3ee88859f5443422004832a9683262524bf9e7b798147f363d9eba2f07c53d6d"
+}

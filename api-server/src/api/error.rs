@@ -60,14 +60,6 @@ impl ErrorResponse {
             error: msg.into(),
         }
     }
-
-    #[must_use]
-    pub fn service_unavailable(msg: impl Into<Box<str>>) -> Self {
-        Self {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            error: msg.into(),
-        }
-    }
 }
 
 impl From<anyhow::Error> for ErrorResponse {

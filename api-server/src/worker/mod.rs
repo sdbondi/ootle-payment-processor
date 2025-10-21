@@ -3,7 +3,12 @@
 
 mod context;
 pub mod jobs;
-mod payment_task;
 mod runner;
 
 pub use runner::*;
+
+#[derive(Debug, Clone)]
+pub enum JobResult {
+    Completed { result: serde_json::Value },
+    RetryIn { duration: std::time::Duration },
+}
