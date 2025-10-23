@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use crate::error::StorageError;
-use crate::models::Job;
+use crate::models::{Job, JobStatus};
+use tari_ootle_common_types::engine_types::template_lib_models::ResourceAddress;
 
 pub trait ReadableStore {
     type ReadTransaction<'tx>: StoreReadTransaction
@@ -35,4 +36,11 @@ pub trait AsReadable {
 pub trait StoreReadTransaction {
     fn get_next_job_id(&mut self) -> impl Future<Output = Result<Option<uuid::Uuid>, StorageError>> + Send;
     fn get_job_by_id(&mut self, id: uuid::Uuid) -> impl Future<Output = Result<Option<Job>, StorageError>> + Send;
+    fn get_next_job_waiting_for_balance(
+        &mut self,
+        resource_address: ResourceAddress,
+        amount: u64,
+    ) -> impl Future<Output = Result<Option<uuid::Uuid>, StorageError>> + Send;
+
+    fn count_jobs_with_status(&mut self, status: JobStatus) -> impl Future<Output = Result<u64, StorageError>> + Send;
 }

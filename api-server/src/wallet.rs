@@ -7,12 +7,13 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use tari_engine_types::template_lib_models::{ComponentAddress, ResourceAddress, VaultId};
 use tari_ootle_common_types::displayable::Displayable;
+use tari_ootle_common_types::optional::Optional;
 use tari_ootle_wallet_sdk::apis::accounts::AccountsApiError;
-use tari_ootle_wallet_sdk::cipher_seed::CipherSeedRestore;
 use tari_ootle_wallet_sdk::models::{
     AccountWithAddress, NewAccountData, TransactionStatus, WalletLockId, WalletTransaction,
 };
 use tari_ootle_wallet_sdk::WalletSdk;
+use tari_ootle_wallet_sdk_services::account_monitor::AccountScanner;
 use tari_ootle_wallet_sdk_services::indexer_rest_api::IndexerRestApiNetworkInterface;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_template_lib_types::{Amount, ResourceType};
@@ -23,11 +24,12 @@ pub type Sdk = WalletSdk<SqliteWalletStore, IndexerRestApiNetworkInterface>;
 #[derive(Debug, Clone)]
 pub struct Wallet {
     sdk: Sdk,
+    account_scanner: AccountScanner<SqliteWalletStore, IndexerRestApiNetworkInterface>,
 }
 
 impl Wallet {
-    pub fn new(sdk: Sdk) -> Self {
-        Self { sdk }
+    pub fn new(sdk: Sdk, account_scanner: AccountScanner<SqliteWalletStore, IndexerRestApiNetworkInterface>) -> Self {
+        Self { sdk, account_scanner }
     }
 
     pub fn sdk(&self) -> &Sdk {
@@ -40,7 +42,7 @@ impl Wallet {
         let vaults = sdk.accounts_api().get_vaults_by_account(account_address)?;
         let stealth_outputs = sdk
             .stealth_outputs_api()
-            .get_unspent_outputs_by_account(account_address)?;
+            .get_unspent_outputs_by_account(account_address, true)?;
 
         let mut balances = Vec::with_capacity(vaults.len());
         let mut vaulted_resources = HashSet::new();
@@ -87,10 +89,9 @@ impl Wallet {
                 acc
             });
 
-        let all_resources = sdk.resources_api().get_many(stealth_outputs_map.keys())?;
-
         for (resource_address, (num_outputs, total_value)) in stealth_outputs_map {
-            let resource = all_resources.get(&resource_address);
+            // TODO(perf): cache resource info to avoid repeated lookups
+            let resource = sdk.resources_api().get(&resource_address).optional()?;
             balances.push(BalanceEntry {
                 vault_address: None,
                 resource_address,
@@ -115,17 +116,6 @@ impl Wallet {
             Some(name) => sdk.accounts_api().get_account_by_name(name)?,
             None => sdk.accounts_api().get_default()?,
         };
-        Ok(account)
-    }
-
-    pub fn create_account(&mut self, name: &str, set_default: bool) -> anyhow::Result<AccountWithAddress> {
-        self.sdk
-            .initialize_cipher_seed(CipherSeedRestore::CreateNewIfRequired)?;
-        let address = self.sdk.key_manager_api().next_account_address()?;
-        let account = self
-            .sdk
-            .accounts_api()
-            .create_account(Some(name), set_default, address)?;
         Ok(account)
     }
 
@@ -290,23 +280,26 @@ impl Wallet {
         &self,
         transaction: Transaction,
         new_account_data: Option<NewAccountData>,
-        lock_id: Option<WalletLockId>,
+        lock_id: WalletLockId,
     ) -> anyhow::Result<WalletTransaction> {
-        let id = self
+        let tx_id = self
             .sdk
             .transaction_api()
-            .insert_new_transaction(transaction, new_account_data, false)?;
-        if let Some(lock_id) = lock_id {
-            self.sdk.stealth_outputs_api().locks_set_transaction_id(lock_id, id)?;
-        }
-        if !self.sdk.transaction_api().submit_transaction(id).await? {
-            return Err(anyhow!("Failed to submit transaction {}", id));
+            .insert_new_transaction(transaction, new_account_data.clone(), false)?;
+        self.sdk.transaction_api().locks_set_transaction_id(lock_id, tx_id)?;
+
+        if !self.sdk.transaction_api().submit_transaction(tx_id).await? {
+            return Err(anyhow!("Failed to submit transaction {}", tx_id));
         }
 
-        self.wait_for_transaction_to_finalize(id).await
+        self.wait_for_transaction_to_finalize(tx_id, new_account_data).await
     }
 
-    async fn wait_for_transaction_to_finalize(&self, id: TransactionId) -> anyhow::Result<WalletTransaction> {
+    async fn wait_for_transaction_to_finalize(
+        &self,
+        id: TransactionId,
+        new_account_data: Option<NewAccountData>,
+    ) -> anyhow::Result<WalletTransaction> {
         loop {
             let maybe_tx = self
                 .sdk()
@@ -314,19 +307,39 @@ impl Wallet {
                 .check_and_store_finalized_transaction(id)
                 .await?;
             match maybe_tx {
-                Some(tx) => {
-                    return if matches!(tx.status, TransactionStatus::Accepted) {
-                        info!("Transaction {} was accepted", id);
-                        Ok(tx)
-                    } else {
-                        Err(anyhow!(
-                            "Transaction {} failed: {:?} {} {}",
+                Some(tx) => match tx.status {
+                    TransactionStatus::New | TransactionStatus::Pending => {
+                        info!("Transaction {} is still pending...", id);
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        continue;
+                    },
+
+                    TransactionStatus::DryRun
+                    | TransactionStatus::DryRunFailed
+                    | TransactionStatus::Rejected
+                    | TransactionStatus::InvalidTransaction => {
+                        return Err(anyhow!(
+                            "Transaction {} failed: {:?}{}{}",
                             id,
                             tx.status,
-                            tx.invalid_reason.as_deref().unwrap_or(""),
+                            tx.invalid_reason.as_deref().unwrap_or(" "),
                             tx.finalize.as_ref().and_then(|f| f.result.any_reject()).display()
-                        ))
-                    };
+                        ));
+                    },
+                    TransactionStatus::Accepted => {
+                        if let Some(diff) = tx.finalize.as_ref().and_then(|f| f.result.any_accept()) {
+                            self.account_scanner.process_result(id, diff, new_account_data).await?;
+                        }
+                        info!("Transaction {} was accepted", id);
+                        return Ok(tx);
+                    },
+                    TransactionStatus::OnlyFeeAccepted => {
+                        if let Some(diff) = tx.finalize.as_ref().and_then(|f| f.result.any_accept()) {
+                            self.account_scanner.process_result(id, diff, new_account_data).await?;
+                        }
+                        info!("Transaction {} had only the fee accepted", id);
+                        return Ok(tx);
+                    },
                 },
                 None => {
                     info!("Transaction {} is still pending...", id);

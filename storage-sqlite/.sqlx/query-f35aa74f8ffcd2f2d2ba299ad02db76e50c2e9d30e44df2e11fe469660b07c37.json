@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE job_queue SET status = 'WaitingForBalance', await_balance_resx = $1, await_balance_amt = $2, attempts = attempts + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "f35aa74f8ffcd2f2d2ba299ad02db76e50c2e9d30e44df2e11fe469660b07c37"
+}

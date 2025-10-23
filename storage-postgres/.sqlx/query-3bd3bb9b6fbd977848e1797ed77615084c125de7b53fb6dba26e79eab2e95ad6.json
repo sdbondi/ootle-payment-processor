@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE job_queue SET status = 'WaitingForBalance', await_balance_resx = $1, await_balance_amt = $2, attempts = attempts + 1, updated_at = now() WHERE id = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3bd3bb9b6fbd977848e1797ed77615084c125de7b53fb6dba26e79eab2e95ad6"
+}

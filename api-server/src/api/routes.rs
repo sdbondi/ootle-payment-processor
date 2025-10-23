@@ -22,7 +22,7 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
 ))]
 pub struct ApiDoc;
 
-pub fn create_router(app: App) -> Router {
+pub fn create_router(app: &App) -> Router {
     Router::new()
         .route("/version", get(handlers::misc::version))
         .route("/health", get(handlers::misc::health))

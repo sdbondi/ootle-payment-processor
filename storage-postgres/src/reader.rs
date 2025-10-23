@@ -3,11 +3,12 @@
 
 use crate::store::PostgresStore;
 use crate::PostgresStorageError;
-use ootle_payment_processor_storage::models::Job;
+use ootle_payment_processor_storage::models::{Job, JobStatus};
 use ootle_payment_processor_storage::{AsReadable, ReadableStore, StorageError};
 use sqlx::types::{uuid, Uuid};
 use sqlx::{Error, PgConnection};
 use std::time::Duration;
+use tari_template_lib::models::ResourceAddress;
 
 impl ReadableStore for PostgresStore {
     type ReadTransaction<'tx> = PostgresReadTransaction<'tx>;
@@ -75,6 +76,35 @@ impl ootle_payment_processor_storage::StoreReadTransaction for PostgresReadTrans
             priority: result.priority as u32,
             result: result.result,
         }))
+    }
+
+    async fn get_next_job_waiting_for_balance(
+        &mut self,
+        resource_address: ResourceAddress,
+        amount: u64,
+    ) -> Result<Option<Uuid>, StorageError> {
+        let result = sqlx::query!(
+            "SELECT id FROM job_queue WHERE status = 'WaitingForBalance' AND await_balance_resx = $1 AND await_balance_amt <= $2 ORDER BY priority DESC, created_at ASC",
+            resource_address.to_string(),
+            amount as i64,
+        )
+        .fetch_optional(self.conn())
+        .await
+        .map_err(|e| StorageError::DatabaseError { source: e.into() })?;
+
+        Ok(result.map(|r| r.id))
+    }
+
+    async fn count_jobs_with_status(&mut self, status: JobStatus) -> Result<u64, StorageError> {
+        let result = sqlx::query!(
+            "SELECT COUNT(*) as count FROM job_queue WHERE status = $1",
+            status.as_str()
+        )
+        .fetch_one(self.conn())
+        .await
+        .map_err(|e| StorageError::DatabaseError { source: e.into() })?;
+
+        Ok(result.count.unwrap_or_default() as u64)
     }
 }
 

@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 ootle-payment-processor-storage = { workspace = true }
+tari_template_lib = { workspace = true }
 
 anyhow = { workspace = true }
 thiserror = { workspace = true }

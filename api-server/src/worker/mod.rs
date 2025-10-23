@@ -7,8 +7,11 @@ mod runner;
 
 pub use runner::*;
 
+use tari_engine_types::template_lib_models::ResourceAddress;
+
 #[derive(Debug, Clone)]
 pub enum JobResult {
     Completed { result: serde_json::Value },
     RetryIn { duration: std::time::Duration },
+    WaitForBalance { resource: ResourceAddress, amount: u64 },
 }

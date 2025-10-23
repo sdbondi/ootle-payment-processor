@@ -3,12 +3,13 @@
 
 use crate::store::SqliteStore;
 use crate::SqliteStorageError;
-use ootle_payment_processor_storage::models::Job;
+use ootle_payment_processor_storage::models::{Job, JobStatus};
 use ootle_payment_processor_storage::{AsReadable, ReadableStore, StorageError};
 use sqlx::types::{uuid, Uuid};
 use sqlx::{Error, SqliteConnection};
 use std::str::FromStr;
 use std::time::Duration;
+use tari_template_lib::models::ResourceAddress;
 
 impl ReadableStore for SqliteStore {
     type ReadTransaction<'tx> = SqliteReadTransaction<'tx>;
@@ -95,6 +96,41 @@ impl ootle_payment_processor_storage::StoreReadTransaction for SqliteReadTransac
                     source: anyhow::anyhow!("Failed to parse result JSON: {}", e),
                 })?,
         }))
+    }
+
+    async fn get_next_job_waiting_for_balance(
+        &mut self,
+        resource_address: ResourceAddress,
+        amount: u64,
+    ) -> Result<Option<Uuid>, StorageError> {
+        let resx = resource_address.to_string();
+        let amount = amount as i64;
+        let result = sqlx::query!(
+            "SELECT uuid FROM job_queue WHERE status = 'WaitingForBalance' AND await_balance_resx = $1 AND await_balance_amt <= $2 ORDER BY priority DESC, created_at ASC",
+            resx,
+            amount,
+        )
+            .fetch_optional(self.conn())
+            .await
+            .map_err(|e| StorageError::DatabaseError { source: e.into() })?;
+
+        let uuid = result
+            .map(|r| r.uuid.parse())
+            .transpose()
+            .map_err(|e| SqliteStorageError::DecodeError {
+                source: anyhow::anyhow!("Failed to parse UUID: {}", e),
+            })?;
+        Ok(uuid)
+    }
+
+    async fn count_jobs_with_status(&mut self, status: JobStatus) -> Result<u64, StorageError> {
+        let status_str = status.as_str();
+        let result = sqlx::query!("SELECT COUNT(*) as count FROM job_queue WHERE status = $1", status_str,)
+            .fetch_one(self.conn())
+            .await
+            .map_err(|e| StorageError::DatabaseError { source: e.into() })?;
+
+        Ok(result.count as u64)
     }
 }
 

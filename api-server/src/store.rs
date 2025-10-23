@@ -6,6 +6,7 @@ use ootle_payment_processor_storage::{
     ReadableStore, StorageError, StoreReadTransaction, StoreWriteTransaction, WriteableStore,
 };
 
+#[derive(Debug, Clone)]
 pub struct Store<TBackend> {
     backend: TBackend,
 }

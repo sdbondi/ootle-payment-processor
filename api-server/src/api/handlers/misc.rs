@@ -49,7 +49,6 @@ pub async fn health(Extension(context): Extension<HandlerContext>) -> Json<HashM
             "Stealth scanner has stopped running".to_string(),
         );
     }
-
     if response.is_empty() {
         response.insert("status", "ok".to_string());
     }

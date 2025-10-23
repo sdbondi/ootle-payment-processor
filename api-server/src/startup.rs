@@ -17,12 +17,13 @@ use tari_ootle_common_types::optional::Optional;
 use tari_ootle_wallet_sdk::cipher_seed::CipherSeedRestore;
 use tari_ootle_wallet_sdk::constants::XTR;
 use tari_ootle_wallet_sdk::{WalletSdk, WalletSdkConfig};
-use tari_ootle_wallet_sdk_services::account_monitor::{AccountMonitor, AccountMonitorHandle};
+use tari_ootle_wallet_sdk_services::account_monitor::{AccountMonitor, AccountMonitorHandle, AccountScanner};
 use tari_ootle_wallet_sdk_services::indexer_rest_api::IndexerRestApiNetworkInterface;
 use tari_ootle_wallet_sdk_services::notify::Notify;
 use tari_ootle_wallet_sdk_services::utxo_scanner::{StealthUtxoScannerWorker, UtxoRecovery};
 use tari_ootle_wallet_sdk_services::ShutdownSignal;
 use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
+use tokio::task;
 
 #[cfg(not(any(feature = "sqlite-storage", feature = "postgres-storage")))]
 compile_error!("At least one storage backend feature must be enabled: sqlite-storage, postgres-storage");
@@ -49,26 +50,34 @@ pub async fn init_app(cli: &Cli, shutdown: ShutdownSignal) -> anyhow::Result<App
         sdk.resources_api().upsert_resource(&XTR, &resource)?;
     }
 
-    let mut wallet = Wallet::new(sdk.clone());
-    let maybe_account = wallet.get_account_or_default(Some("payment-processor")).optional()?;
-    let account = maybe_account
-        .map(Ok)
-        .unwrap_or_else(|| wallet.create_account("payment-processor", true))?;
+    let maybe_account = sdk.accounts_api().get_account_by_name("payment-processor").optional()?;
+    let account = maybe_account.map(Ok).unwrap_or_else(|| {
+        let address = sdk.key_manager_api().next_account_address()?;
+        sdk.accounts_api()
+            .create_account(Some("payment-processor"), true, address)
+    })?;
     info!("💰️ 💰️ 💰️ 💰️ FUNDING ADDRESS: {} 💰️ 💰️ 💰️ 💰️", account.address());
 
-    let notify = Notify::new(1000);
+    let wallet_notify = Notify::new(1000);
 
-    let scanner = StealthUtxoScannerWorker::new(sdk.clone(), notify.clone());
+    let scanner = StealthUtxoScannerWorker::new(sdk.clone(), wallet_notify.clone());
     let (stealth_scanner_join_handle, utxo_scanner_handle) = scanner.spawn();
 
     let utxo_recovery_join_handle = {
-        let sdk = wallet.sdk().clone();
         let notify_sub = utxo_scanner_handle.subscribe_notifications();
-        tokio::spawn(UtxoRecovery::new(sdk).run(notify_sub))
+        tokio::spawn(UtxoRecovery::new(sdk.clone()).run(notify_sub))
     };
 
-    let (monitor, account_monitor_handle) = AccountMonitor::new(notify, sdk, utxo_scanner_handle, shutdown);
+    let (monitor, account_monitor_handle) = AccountMonitor::new(
+        wallet_notify.clone(),
+        sdk.clone(),
+        utxo_scanner_handle,
+        shutdown.clone(),
+    );
     let account_monitor_join_handle = tokio::spawn(monitor.with_periodic_scan_interval(Duration::from_secs(20)).run());
+    let account_scanner = AccountScanner::new(wallet_notify, sdk.clone());
+    // let (tx_service, transaction_service_handle) = TransactionService::new(wallet_notify, sdk.clone(), shutdown);
+    // let tx_service_join_handle = task::spawn(tx_service.run());
 
     let notify = Notify::new(1000);
 
@@ -80,7 +89,9 @@ pub async fn init_app(cli: &Cli, shutdown: ShutdownSignal) -> anyhow::Result<App
 
     store.migrate().await?;
 
-    let handle = TaskWorker::new(store.clone(), wallet.clone(), notify.subscribe()).spawn();
+    let wallet = Wallet::new(sdk, account_scanner);
+
+    let handle = (!cli.idle).then(|| TaskWorker::new(store.clone(), wallet.clone(), notify.subscribe()).spawn());
 
     Ok(App {
         _account_monitor_handle: account_monitor_handle,
@@ -102,8 +113,8 @@ pub(crate) struct App {
     #[cfg(feature = "sqlite-storage")]
     pub store: Store<SqliteStore>,
     pub notify: Notify<PaymentProcessorEvent>,
-    pub task_worker_join_handle: tokio::task::JoinHandle<()>,
-    pub stealth_scanner_join_handle: tokio::task::JoinHandle<anyhow::Result<()>>,
-    pub utxo_recovery_join_handle: tokio::task::JoinHandle<anyhow::Result<()>>,
-    pub account_monitor_join_handle: tokio::task::JoinHandle<anyhow::Result<()>>,
+    pub task_worker_join_handle: Option<task::JoinHandle<()>>,
+    pub stealth_scanner_join_handle: task::JoinHandle<anyhow::Result<()>>,
+    pub utxo_recovery_join_handle: task::JoinHandle<anyhow::Result<()>>,
+    pub account_monitor_join_handle: task::JoinHandle<anyhow::Result<()>>,
 }

@@ -76,6 +76,7 @@ where
     async fn main_task(&mut self) -> anyhow::Result<ControlFlow<()>> {
         tokio::select! {
             _ = self.interval.tick() => {
+                self.log_queue_stats().await?;
                 self.check_queue_for_more_jobs().await?;
                 Ok(ControlFlow::Continue(()))
             },
@@ -93,6 +94,7 @@ where
                     },
                     Err(_) => {
                         // All senders have been dropped, time to shut down
+                        self.shutdown().await;
                         Ok(ControlFlow::Break(()))
                     },
                 }
@@ -108,8 +110,41 @@ where
         }
     }
 
+    async fn shutdown(&mut self) {
+        log::info!("👷 Worker is shutting down. Waiting for running tasks to complete...");
+        while !self.work_queue.is_empty() {
+            let (job_id, result) = poll_fn(|cx| self.work_queue.poll_unpin(cx)).await;
+            if let Err(err) = self.handle_completed_task(job_id, result).await {
+                log::error!("👷 Error handling completed task {} during shutdown: {}", job_id, err);
+            }
+        }
+        log::info!("👷 All running tasks have completed. Worker shutdown complete.");
+    }
+
     fn is_work_queue_full(&self) -> bool {
         self.work_queue.len() >= MAX_CONCURRENT_JOBS
+    }
+
+    async fn log_queue_stats(&mut self) -> anyhow::Result<()> {
+        let mut tx = self.store.create_read_tx().await?;
+        let pending_jobs = tx.count_jobs_with_status(JobStatus::Pending).await?;
+        let in_progress_jobs = tx.count_jobs_with_status(JobStatus::InProgress).await?;
+        let waiting_for_balance_jobs = tx.count_jobs_with_status(JobStatus::WaitingForBalance).await?;
+
+        let metrics = tokio::runtime::Handle::current().metrics();
+        info!(
+            "👷 Queue Stats - Pending: {}, In Progress: {}, Waiting for Balance: {}, Active Workers: {}/{}, Tokio: {}/{}/{}",
+            pending_jobs,
+            in_progress_jobs,
+            waiting_for_balance_jobs,
+            self.work_queue.len(),
+            MAX_CONCURRENT_JOBS,
+            metrics.num_alive_tasks(),
+            metrics.num_workers(),
+            metrics.global_queue_depth(),
+        );
+
+        Ok(())
     }
 
     async fn dispatch_job(&mut self, job_id: uuid::Uuid) -> anyhow::Result<bool> {
@@ -129,6 +164,7 @@ where
             }
             job
         };
+
         info!(
             "👷 Dispatching job: {} {} - queue: {}/{}",
             job.id,
@@ -195,10 +231,10 @@ where
                     self.work_queue.len(),
                     MAX_CONCURRENT_JOBS
                 );
-                tx.set_completed_job_result(&task_id, exec_time, result).await?;
+                tx.job_set_completed_result(&task_id, exec_time, result).await?;
             },
             Ok(Ok(JobResult::RetryIn { duration })) => {
-                let attempts = tx.requeue_job(&task_id, duration).await?;
+                let attempts = tx.job_requeue_for_later(&task_id, duration).await?;
                 log::info!(
                     "👷 Task {} will be retried (attempt #{}) - ({}/{})",
                     task_id,
@@ -206,6 +242,15 @@ where
                     self.work_queue.len(),
                     MAX_CONCURRENT_JOBS
                 );
+            },
+            Ok(Ok(JobResult::WaitForBalance { resource, amount })) => {
+                log::info!(
+                    "👷 Task {} waiting for balance {amount} ({}/{})",
+                    task_id,
+                    self.work_queue.len(),
+                    MAX_CONCURRENT_JOBS
+                );
+                tx.job_requeue_for_balance(&task_id, resource, amount).await?;
             },
             Ok(Err(err)) => {
                 log::error!(
@@ -224,7 +269,7 @@ where
                     self.work_queue.len(),
                     MAX_CONCURRENT_JOBS
                 );
-                tx.set_job_status(&task_id, JobStatus::TimedOut).await?;
+                tx.job_set_status(&task_id, JobStatus::TimedOut).await?;
             },
         }
 
@@ -242,11 +287,31 @@ where
             return Ok(());
         }
 
+        let account = self.wallet.get_account_or_default(None)?;
+        let balances = self.wallet.get_balances(account.component_address())?;
         loop {
             let job_id = {
                 let mut tx = self.store.create_read_tx().await?;
-                tx.get_next_job_id().await?
+                let mut unpaused_job = None;
+                for balance in &balances {
+                    if let Some(id) = tx
+                        .get_next_job_waiting_for_balance(
+                            balance.resource_address,
+                            balance.total_balance().to_u64_checked().unwrap_or(u64::MAX),
+                        )
+                        .await?
+                    {
+                        info!("👷 Found unpaused job waiting for balance: {}", id);
+                        unpaused_job = Some(id);
+                        break;
+                    }
+                }
+                match unpaused_job {
+                    Some(id) => Some(id),
+                    None => tx.get_next_job_id().await?,
+                }
             };
+
             let Some(job_id) = job_id else {
                 break;
             };
@@ -269,7 +334,7 @@ async fn set_job_status<TStore: WriteableStore>(
     status: JobStatus,
 ) -> anyhow::Result<()> {
     let mut tx = store.create_write_tx().await?;
-    tx.set_job_status(id, status).await?;
+    tx.job_set_status(id, status).await?;
     tx.commit().await?;
     Ok(())
 }

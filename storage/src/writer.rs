@@ -5,6 +5,7 @@ use crate::error::StorageError;
 use crate::models::{JobStatus, JobType};
 use crate::reader::ReadableStore;
 use std::time::Duration;
+use tari_ootle_common_types::engine_types::template_lib_models::ResourceAddress;
 
 pub trait WriteableStore: ReadableStore {
     type WriteTransaction<'a>: StoreWriteTransaction
@@ -45,23 +46,29 @@ pub trait StoreWriteTransaction {
         data: Option<serde_json::Value>,
     ) -> impl Future<Output = Result<uuid::Uuid, StorageError>> + Send;
 
-    fn set_job_status(
+    fn job_set_status(
         &mut self,
         id: &uuid::Uuid,
         status: JobStatus,
+    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+    fn job_requeue_for_balance(
+        &mut self,
+        id: &uuid::Uuid,
+        resource_address: ResourceAddress,
+        amount: u64,
     ) -> impl Future<Output = Result<(), StorageError>> + Send;
     fn set_failure_reason(
         &mut self,
         id: &uuid::Uuid,
         reason: String,
     ) -> impl Future<Output = Result<(), StorageError>> + Send;
-    fn set_completed_job_result(
+    fn job_set_completed_result(
         &mut self,
         id: &uuid::Uuid,
         execution_time: Duration,
         result: serde_json::Value,
     ) -> impl Future<Output = Result<(), StorageError>> + Send;
-    fn requeue_job(
+    fn job_requeue_for_later(
         &mut self,
         id: &uuid::Uuid,
         schedule: Duration,

@@ -17,13 +17,37 @@ async fn main() -> anyhow::Result<()> {
     env_logger::builder().filter_level(log::LevelFilter::Info).init();
     let cli = Cli::init();
 
-    let shutdown = Shutdown::new();
+    let mut shutdown = Shutdown::new();
 
-    let app = startup::init_app(&cli, shutdown.to_signal()).await?;
+    let mut app = startup::init_app(&cli, shutdown.to_signal()).await?;
 
-    api::start(cli.bind_address, app, shutdown.to_signal()).await?;
+    let api_fut = api::start(cli.bind_address, &app, shutdown.to_signal());
 
-    // TODO: handle ctrl-c and shutdown properly
+    tokio::select! {
+        res = api_fut => {
+            res?;
+        }
+        res = tokio::signal::ctrl_c() => {
+            res?;
+            shutdown.trigger();
+            log::info!("Shutdown signal received, shutting down...");
+        }
+    }
+
+    // Wait for clean shutdown of background tasks
+    if let Some(worker) = app.task_worker_join_handle.take() {
+        // Ensure channels/notifies are dropped, some services only exit if these are dropped
+        drop(app);
+        tokio::select! {
+           res = worker => {
+                res?;
+            },
+            res = tokio::signal::ctrl_c() => {
+                res?;
+                log::info!("Forced shutdown signal received, terminating immediately...");
+            }
+        }
+    }
 
     Ok(())
 }

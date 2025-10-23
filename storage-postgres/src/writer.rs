@@ -9,6 +9,7 @@ use serde_json::Value;
 use sqlx::types::{uuid, Uuid};
 use sqlx::PgConnection;
 use std::time::Duration;
+use tari_template_lib::models::ResourceAddress;
 
 impl WriteableStore for PostgresStore {
     type WriteTransaction<'a> = PostgresWriteTransaction<'a>;
@@ -54,7 +55,7 @@ impl ootle_payment_processor_storage::StoreWriteTransaction for PostgresWriteTra
         Ok(a.id)
     }
 
-    async fn set_job_status(&mut self, id: &Uuid, status: JobStatus) -> Result<(), StorageError> {
+    async fn job_set_status(&mut self, id: &Uuid, status: JobStatus) -> Result<(), StorageError> {
         sqlx::query!(
             "UPDATE job_queue SET status = $1, updated_at = now() WHERE id = $2",
             status.as_str(),
@@ -63,6 +64,32 @@ impl ootle_payment_processor_storage::StoreWriteTransaction for PostgresWriteTra
         .execute(self.conn())
         .await
         .map_err(|e| StorageError::DatabaseError { source: e.into() })?;
+        Ok(())
+    }
+
+    async fn job_requeue_for_balance(
+        &mut self,
+        id: &Uuid,
+        resource_address: ResourceAddress,
+        amount: u64,
+    ) -> Result<(), StorageError> {
+        sqlx::query!(
+            "UPDATE job_queue \
+                SET \
+                    status = 'WaitingForBalance', \
+                    await_balance_resx = $1, \
+                    await_balance_amt = $2, \
+                    attempts = attempts + 1, \
+                    updated_at = now() \
+                WHERE id = $3",
+            resource_address.to_string(),
+            amount as i64,
+            id
+        )
+        .execute(self.conn())
+        .await
+        .map_err(|e| StorageError::DatabaseError { source: e.into() })?;
+
         Ok(())
     }
 
@@ -79,7 +106,7 @@ impl ootle_payment_processor_storage::StoreWriteTransaction for PostgresWriteTra
         Ok(())
     }
 
-    async fn set_completed_job_result(
+    async fn job_set_completed_result(
         &mut self,
         id: &Uuid,
         execution_time: Duration,
@@ -98,7 +125,7 @@ impl ootle_payment_processor_storage::StoreWriteTransaction for PostgresWriteTra
         Ok(())
     }
 
-    async fn requeue_job(&mut self, id: &Uuid, scheduled_at: Duration) -> Result<u32, StorageError> {
+    async fn job_requeue_for_later(&mut self, id: &Uuid, scheduled_at: Duration) -> Result<u32, StorageError> {
         #[allow(clippy::cast_possible_truncation)]
         let secs = if scheduled_at.as_secs() > f64::MAX.floor() as u64 {
             f64::MAX.floor()

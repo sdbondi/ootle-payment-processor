@@ -9,6 +9,7 @@ use serde_json::Value;
 use sqlx::types::{uuid, Uuid};
 use sqlx::SqliteConnection;
 use std::time::Duration;
+use tari_template_lib::models::ResourceAddress;
 
 impl WriteableStore for SqliteStore {
     type WriteTransaction<'a> = SqliteWriteTransaction<'a>;
@@ -59,7 +60,7 @@ impl ootle_payment_processor_storage::StoreWriteTransaction for SqliteWriteTrans
         Ok(uuid)
     }
 
-    async fn set_job_status(&mut self, id: &Uuid, status: JobStatus) -> Result<(), StorageError> {
+    async fn job_set_status(&mut self, id: &Uuid, status: JobStatus) -> Result<(), StorageError> {
         let id_str = id.to_string();
         let status_str = status.as_str();
         sqlx::query!(
@@ -70,6 +71,35 @@ impl ootle_payment_processor_storage::StoreWriteTransaction for SqliteWriteTrans
         .execute(self.conn())
         .await
         .map_err(|e| StorageError::DatabaseError { source: e.into() })?;
+        Ok(())
+    }
+
+    async fn job_requeue_for_balance(
+        &mut self,
+        id: &Uuid,
+        resource_address: ResourceAddress,
+        amount: u64,
+    ) -> Result<(), StorageError> {
+        let resx = resource_address.to_string();
+        let amount = amount as i64;
+
+        sqlx::query!(
+            "UPDATE job_queue \
+                SET \
+                    status = 'WaitingForBalance', \
+                    await_balance_resx = $1, \
+                    await_balance_amt = $2, \
+                    attempts = attempts + 1, \
+                    updated_at = CURRENT_TIMESTAMP \
+                WHERE id = $3",
+            resx,
+            amount,
+            id
+        )
+        .execute(self.conn())
+        .await
+        .map_err(|e| StorageError::DatabaseError { source: e.into() })?;
+
         Ok(())
     }
 
@@ -87,7 +117,7 @@ impl ootle_payment_processor_storage::StoreWriteTransaction for SqliteWriteTrans
         Ok(())
     }
 
-    async fn set_completed_job_result(
+    async fn job_set_completed_result(
         &mut self,
         id: &Uuid,
         execution_time: Duration,
@@ -108,7 +138,7 @@ impl ootle_payment_processor_storage::StoreWriteTransaction for SqliteWriteTrans
         Ok(())
     }
 
-    async fn requeue_job(&mut self, id: &Uuid, scheduled_at: Duration) -> Result<u32, StorageError> {
+    async fn job_requeue_for_later(&mut self, id: &Uuid, scheduled_at: Duration) -> Result<u32, StorageError> {
         #[allow(clippy::cast_possible_truncation)]
         let secs = if scheduled_at.as_secs() > f64::MAX.floor() as u64 {
             f64::MAX.floor()

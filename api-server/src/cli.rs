@@ -29,6 +29,9 @@ pub struct Cli {
     pub indexer_api_url: Url,
     #[arg(long, default_value_t = Network::LocalNet, env = "WALLET_NETWORK")]
     pub network: Network,
+    /// Run in idle mode (do not process payments)
+    #[arg(long, default_value_t = false)]
+    pub idle: bool,
 }
 
 impl Cli {

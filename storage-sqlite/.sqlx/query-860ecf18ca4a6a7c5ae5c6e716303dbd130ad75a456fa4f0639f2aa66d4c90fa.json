@@ -54,18 +54,28 @@
         "type_info": "Text"
       },
       {
-        "name": "priority",
+        "name": "await_balance_resx",
         "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "await_balance_amt",
+        "ordinal": 11,
+        "type_info": "Integer"
+      },
+      {
+        "name": "priority",
+        "ordinal": 12,
         "type_info": "Integer"
       },
       {
         "name": "created_at",
-        "ordinal": 11,
+        "ordinal": 13,
         "type_info": "Datetime"
       },
       {
         "name": "updated_at",
-        "ordinal": 12,
+        "ordinal": 14,
         "type_info": "Datetime"
       }
     ],
@@ -81,6 +91,8 @@
       false,
       false,
       false,
+      true,
+      true,
       true,
       true,
       false,

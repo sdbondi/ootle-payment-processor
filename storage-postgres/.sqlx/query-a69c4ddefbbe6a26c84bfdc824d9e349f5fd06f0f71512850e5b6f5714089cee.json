@@ -50,16 +50,26 @@
       },
       {
         "ordinal": 9,
+        "name": "await_balance_resx",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "await_balance_amt",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 11,
         "name": "priority",
         "type_info": "Int4"
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -77,6 +87,8 @@
       false,
       false,
       false,
+      true,
+      true,
       true,
       true,
       false,

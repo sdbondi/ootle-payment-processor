@@ -23,7 +23,7 @@ impl Job {
     pub fn is_valid_transition(&self, new_status: JobStatus) -> bool {
         #[allow(clippy::match_like_matches_macro)]
         match (&self.status, &new_status) {
-            (JobStatus::Pending, JobStatus::InProgress) => true,
+            (JobStatus::Pending | JobStatus::WaitingForBalance, JobStatus::InProgress) => true,
             (JobStatus::InProgress, JobStatus::Completed) => true,
             (JobStatus::InProgress, JobStatus::Failed) => true,
             _ => false,
@@ -37,6 +37,7 @@ pub enum JobStatus {
     InProgress,
     Completed,
     Failed,
+    WaitingForBalance,
     TimedOut,
     Invalid,
 }
@@ -48,6 +49,7 @@ impl JobStatus {
             Self::InProgress => "InProgress",
             Self::Completed => "Completed",
             Self::Failed => "Failed",
+            Self::WaitingForBalance => "WaitingForBalance",
             Self::TimedOut => "TimedOut",
             Self::Invalid => "Invalid",
         }
@@ -62,6 +64,7 @@ impl FromStr for JobStatus {
             "InProgress" => Ok(Self::InProgress),
             "Completed" => Ok(Self::Completed),
             "Failed" => Ok(Self::Failed),
+            "WaitingForBalance" => Ok(Self::WaitingForBalance),
             "TimedOut" => Ok(Self::TimedOut),
             "Invalid" => Ok(Self::Invalid),
             _ => Err(anyhow::anyhow!("Unknown work item status: {}", s)),

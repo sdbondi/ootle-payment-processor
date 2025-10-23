@@ -4,7 +4,7 @@
 use crate::api::context::HandlerContext;
 use crate::api::error::ErrorResponse;
 use crate::event::PaymentProcessorEvent;
-use crate::worker::jobs::send_payment::SendPaymentJobPayload;
+use crate::worker::jobs::send_payment::{SendPaymentJobPayload, TransferRequest};
 use axum::extract::Path;
 use axum::response::Json;
 use axum::Extension;
@@ -12,17 +12,13 @@ use ootle_payment_processor_storage::models::{JobStatus, JobType};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tari_engine_types::template_lib_models::ResourceAddress;
-use tari_ootle_wallet_sdk::crypto::memo::Memo;
 use tari_ootle_wallet_sdk::models::WalletTransaction;
-use tari_ootle_wallet_sdk::OotleAddress;
 
 #[derive(Deserialize, Serialize)]
 pub struct PaymentCreateRequest {
-    pub amount: u64,
     pub resource: ResourceAddress,
+    pub transfers: Box<[TransferRequest]>,
     pub max_fee: u64,
-    pub to_address: OotleAddress,
-    pub memo: Option<Memo>,
     #[serde(default)]
     pub priority: u32,
 }
@@ -37,7 +33,7 @@ pub async fn create(
     Extension(context): Extension<HandlerContext>,
     Json(req): Json<PaymentCreateRequest>,
 ) -> Result<Json<PaymentCreateResponse>, ErrorResponse> {
-    if req.amount == 0 {
+    if req.transfers.iter().any(|t| t.amount == 0) {
         return Err(ErrorResponse::bad_request("Amount must be greater than zero"));
     }
 
@@ -47,11 +43,9 @@ pub async fn create(
             JobType::ProcessPayment,
             Some(
                 serde_json::to_value(&SendPaymentJobPayload {
-                    amount: req.amount,
                     resource: req.resource,
+                    transfers: req.transfers,
                     max_fee: req.max_fee,
-                    to_address: req.to_address,
-                    memo: req.memo,
                 })
                 .unwrap(),
             ),

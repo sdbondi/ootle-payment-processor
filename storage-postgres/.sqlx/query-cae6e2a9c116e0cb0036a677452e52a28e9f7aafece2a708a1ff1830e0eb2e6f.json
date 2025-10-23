@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id FROM job_queue WHERE status = 'WaitingForBalance' AND await_balance_resx = $1 AND await_balance_amt <= $2 ORDER BY priority DESC, created_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "cae6e2a9c116e0cb0036a677452e52a28e9f7aafece2a708a1ff1830e0eb2e6f"
+}

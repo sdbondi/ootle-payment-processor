@@ -11,7 +11,7 @@ mod error;
 pub mod handlers;
 mod routes;
 
-pub async fn start(addr: SocketAddr, app: App, shutdown: ShutdownSignal) -> anyhow::Result<()> {
+pub async fn start(addr: SocketAddr, app: &App, shutdown: ShutdownSignal) -> anyhow::Result<()> {
     let app = routes::create_router(app);
     let listener = net::TcpListener::bind(addr).await?;
 
