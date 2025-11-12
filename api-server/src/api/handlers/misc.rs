@@ -4,8 +4,8 @@
 use crate::api::context::HandlerContext;
 use axum::response::Json;
 use axum::Extension;
+use indexmap::IndexMap;
 use serde::Serialize;
-use std::collections::HashMap;
 
 #[derive(Serialize)]
 pub struct VersionResponse {
@@ -20,16 +20,26 @@ pub async fn version() -> Json<VersionResponse> {
 }
 
 #[utoipa::path(get, path = "/health", description = "Get health status")]
-pub async fn health(Extension(context): Extension<HandlerContext>) -> Json<HashMap<&'static str, String>> {
-    let err = context.store().backend().test_connection().await.err();
-    let mut response = HashMap::new();
-    if let Some(err) = err {
-        response.insert("status", "error".to_string());
-        response.insert("database_error", err.to_string());
+pub async fn health(Extension(context): Extension<HandlerContext>) -> Json<IndexMap<&'static str, String>> {
+    let stats = context.store().get_queue_stats().await;
+    let mut response = IndexMap::new();
+    let mut status = "ok";
+    match stats {
+        Ok(s) => {
+            response.insert("pending_jobs", s.pending_jobs.to_string());
+            response.insert("in_progress_jobs", s.in_progress_jobs.to_string());
+            response.insert("completed_jobs", s.completed_jobs.to_string());
+            response.insert("failed_jobs", s.failed_jobs.to_string());
+        },
+        Err(err) => {
+            response.insert("database_error", err.to_string());
+            status = "error";
+        },
     }
     if !context.is_worker_running() {
         response.insert("status", "error".to_string());
         response.insert("worker_error", "Worker has stopped running".to_string());
+        status = "error";
     }
     if !context.is_account_monitor_running() {
         response.insert("status", "error".to_string());
@@ -37,20 +47,20 @@ pub async fn health(Extension(context): Extension<HandlerContext>) -> Json<HashM
             "account_monitor_error",
             "Account monitor has stopped running".to_string(),
         );
+        status = "error";
     }
+
     if !context.is_utxo_scanner_running() {
-        response.insert("status", "error".to_string());
         response.insert("utxo_scanner_error", "Utxo scanner has stopped running".to_string());
+        status = "error";
     }
     if !context.is_stealth_scanner_running() {
-        response.insert("status", "error".to_string());
+        status = "error";
         response.insert(
             "stealth_scanner_error",
             "Stealth scanner has stopped running".to_string(),
         );
     }
-    if response.is_empty() {
-        response.insert("status", "ok".to_string());
-    }
+    response.insert("status", status.to_string());
     Json(response)
 }

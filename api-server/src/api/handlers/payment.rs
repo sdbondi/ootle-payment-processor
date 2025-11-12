@@ -12,12 +12,15 @@ use ootle_payment_processor_storage::models::{JobStatus, JobType};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tari_engine_types::template_lib_models::ResourceAddress;
+use tari_ootle_wallet_sdk::apis::stealth_transfer::BadgeUsage;
 use tari_ootle_wallet_sdk::models::WalletTransaction;
 
 #[derive(Deserialize, Serialize)]
 pub struct PaymentCreateRequest {
     pub resource: ResourceAddress,
     pub transfers: Box<[TransferRequest]>,
+    #[serde(default)]
+    pub badge_usage: BadgeUsage,
     pub max_fee: u64,
     #[serde(default)]
     pub priority: u32,
@@ -45,6 +48,7 @@ pub async fn create(
                 serde_json::to_value(&SendPaymentJobPayload {
                     resource: req.resource,
                     transfers: req.transfers,
+                    badge_usage: req.badge_usage,
                     max_fee: req.max_fee,
                 })
                 .unwrap(),

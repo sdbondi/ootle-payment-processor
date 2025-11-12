@@ -16,6 +16,7 @@ use std::time::Duration;
 use tari_ootle_common_types::optional::Optional;
 use tari_ootle_wallet_sdk::cipher_seed::CipherSeedRestore;
 use tari_ootle_wallet_sdk::constants::XTR;
+use tari_ootle_wallet_sdk::models::EpochBirthday;
 use tari_ootle_wallet_sdk::{WalletSdk, WalletSdkConfig};
 use tari_ootle_wallet_sdk_services::account_monitor::{AccountMonitor, AccountMonitorHandle, AccountScanner};
 use tari_ootle_wallet_sdk_services::indexer_rest_api::IndexerRestApiNetworkInterface;
@@ -38,7 +39,7 @@ pub async fn init_app(cli: &Cli, shutdown: ShutdownSignal) -> anyhow::Result<App
         override_keyring_password: Some("ootle-wallet-sdk".into()),
     };
 
-    let mut sdk = WalletSdk::initialize(sdk_store, indexer_interface, config)?;
+    let mut sdk = WalletSdk::initialize(sdk_store, indexer_interface, config, EpochBirthday::far_future())?;
     sdk.initialize_cipher_seed(CipherSeedRestore::CreateNewIfRequired)?;
 
     if !sdk.resources_api().exists(&XTR)? {

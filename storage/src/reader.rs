@@ -42,5 +42,5 @@ pub trait StoreReadTransaction {
         amount: u64,
     ) -> impl Future<Output = Result<Option<uuid::Uuid>, StorageError>> + Send;
 
-    fn count_jobs_with_status(&mut self, status: JobStatus) -> impl Future<Output = Result<u64, StorageError>> + Send;
+    fn count_jobs_by_status(&mut self, status: JobStatus) -> impl Future<Output = Result<u64, StorageError>> + Send;
 }

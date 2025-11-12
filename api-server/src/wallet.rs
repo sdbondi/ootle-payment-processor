@@ -10,7 +10,7 @@ use tari_ootle_common_types::displayable::Displayable;
 use tari_ootle_common_types::optional::Optional;
 use tari_ootle_wallet_sdk::apis::accounts::AccountsApiError;
 use tari_ootle_wallet_sdk::models::{
-    AccountWithAddress, NewAccountData, TransactionStatus, WalletLockId, WalletTransaction,
+    AccountWithAddress, NewAccountData, TransactionStatus, WalletLockDropGuard, WalletTransaction,
 };
 use tari_ootle_wallet_sdk::WalletSdk;
 use tari_ootle_wallet_sdk_services::account_monitor::AccountScanner;
@@ -50,8 +50,8 @@ impl Wallet {
             let (utxo_count, confidential_balance) = if vault.resource_type.is_stealth() {
                 let (utxo_count, stealth_balance) = stealth_outputs
                     .iter()
-                    .filter(|o| o.owner_account == *account_address && o.resource_address == vault.resource_address)
-                    .map(|o| o.value)
+                    .filter(|o| o.resource_address == vault.resource_address)
+                    .map(|o| Amount::from(o.value))
                     .fold((0usize, Amount::zero()), |(cnt, acc), o| (cnt + 1, acc + o));
 
                 if stealth_balance.is_positive() {
@@ -80,12 +80,13 @@ impl Wallet {
             .iter()
             .filter(|o| !vaulted_resources.contains(&o.resource_address))
             .fold(HashMap::new(), |mut acc, o| {
+                let value = Amount::from(o.value);
                 acc.entry(o.resource_address)
                     .and_modify(|(cnt, v)| {
                         *cnt += 1;
-                        *v += o.value
+                        *v += value;
                     })
-                    .or_insert((1, o.value));
+                    .or_insert((1, value));
                 acc
             });
 
@@ -280,17 +281,22 @@ impl Wallet {
         &self,
         transaction: Transaction,
         new_account_data: Option<NewAccountData>,
-        lock_id: WalletLockId,
+        lock_guard: WalletLockDropGuard<'_, SqliteWalletStore>,
     ) -> anyhow::Result<WalletTransaction> {
         let tx_id = self
             .sdk
             .transaction_api()
             .insert_new_transaction(transaction, new_account_data.clone(), false)?;
-        self.sdk.transaction_api().locks_set_transaction_id(lock_id, tx_id)?;
+        self.sdk
+            .transaction_api()
+            .locks_set_transaction_id(lock_guard.id(), tx_id)?;
 
         if !self.sdk.transaction_api().submit_transaction(tx_id).await? {
             return Err(anyhow!("Failed to submit transaction {}", tx_id));
         }
+
+        // Prevent the lock from being released until the transaction is finalized
+        lock_guard.keep_locked();
 
         self.wait_for_transaction_to_finalize(tx_id, new_account_data).await
     }

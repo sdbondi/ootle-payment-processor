@@ -18,7 +18,7 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 
-const MAX_CONCURRENT_JOBS: usize = 10;
+const MAX_CONCURRENT_JOBS: usize = 20;
 
 pub struct TaskWorker<TStore> {
     store: TStore,
@@ -127,9 +127,9 @@ where
 
     async fn log_queue_stats(&mut self) -> anyhow::Result<()> {
         let mut tx = self.store.create_read_tx().await?;
-        let pending_jobs = tx.count_jobs_with_status(JobStatus::Pending).await?;
-        let in_progress_jobs = tx.count_jobs_with_status(JobStatus::InProgress).await?;
-        let waiting_for_balance_jobs = tx.count_jobs_with_status(JobStatus::WaitingForBalance).await?;
+        let pending_jobs = tx.count_jobs_by_status(JobStatus::Pending).await?;
+        let in_progress_jobs = tx.count_jobs_by_status(JobStatus::InProgress).await?;
+        let waiting_for_balance_jobs = tx.count_jobs_by_status(JobStatus::WaitingForBalance).await?;
 
         let metrics = tokio::runtime::Handle::current().metrics();
         info!(

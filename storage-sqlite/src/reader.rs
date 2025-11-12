@@ -123,7 +123,7 @@ impl ootle_payment_processor_storage::StoreReadTransaction for SqliteReadTransac
         Ok(uuid)
     }
 
-    async fn count_jobs_with_status(&mut self, status: JobStatus) -> Result<u64, StorageError> {
+    async fn count_jobs_by_status(&mut self, status: JobStatus) -> Result<u64, StorageError> {
         let status_str = status.as_str();
         let result = sqlx::query!("SELECT COUNT(*) as count FROM job_queue WHERE status = $1", status_str,)
             .fetch_one(self.conn())

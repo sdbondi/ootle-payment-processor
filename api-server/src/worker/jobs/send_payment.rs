@@ -10,18 +10,22 @@ use rand::{rng, Rng};
 use serde::{Deserialize, Serialize};
 use tari_engine_types::template_lib_models::ResourceAddress;
 use tari_engine_types::ToByteType;
-use tari_ootle_wallet_sdk::apis::confidential_transfer::ConfidentialTransferInputSelection;
+use tari_ootle_wallet_sdk::apis::confidential_transfer::UtxoInputSelection;
 use tari_ootle_wallet_sdk::apis::stealth_transfer::{
-    StealthTransferApiError, StealthTransferOutput, StealthTransferParams, TransferOutput,
+    BadgeUsage, StealthTransferApiError, StealthTransferOutput, StealthTransferParams, TransferOutput,
 };
 use tari_ootle_wallet_sdk::crypto::memo::Memo;
+use tari_ootle_wallet_sdk::models::WalletLockDropGuard;
 use tari_ootle_wallet_sdk::OotleAddress;
+use tari_ootle_wallet_storage_sqlite::SqliteWalletStore;
 use tari_transaction::TransactionSignature;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SendPaymentJobPayload {
     pub transfers: Box<[TransferRequest]>,
     pub resource: ResourceAddress,
+    #[serde(default)]
+    pub badge_usage: BadgeUsage,
     pub max_fee: u64,
 }
 
@@ -80,22 +84,26 @@ pub async fn do_work(context: JobContext, job: Job, params: SendPaymentJobPayloa
 
     let sdk = context.wallet.sdk();
 
+    let total_spend_amount = params.total_spend_amount();
+
     let result = sdk
         .stealth_transfer_api()
         .transfer(
             default_account,
             StealthTransferParams {
-                input_selection: ConfidentialTransferInputSelection::PreferRevealed,
+                fee_input_selection: UtxoInputSelection::PreferRevealed,
+                input_selection: UtxoInputSelection::PreferRevealed,
                 outputs: params
                     .transfers
                     .iter()
                     .map(|t| TransferOutput {
-                        blinded_amount: t.amount.into(),
+                        blinded_amount: t.amount,
                         revealed_amount: Default::default(),
                         memo: t.memo.clone(),
                         address: t.to_address.clone(),
                     })
                     .collect(),
+                badge_usage: params.badge_usage,
                 resource_address: params.resource,
                 max_fee: params.max_fee,
                 is_dry_run: false,
@@ -104,16 +112,16 @@ pub async fn do_work(context: JobContext, job: Job, params: SendPaymentJobPayloa
         .await;
 
     match result {
-        Ok(transfer) => submit_transfer(&context, job, sdk, transfer).await,
+        Ok((lock_guard, transfer)) => submit_transfer(&context, job, sdk, transfer, lock_guard).await,
         // If several jobs are being processed concurrently, it is possible that the balance check above passes before another transfer uses the funds
-        Err(StealthTransferApiError::InsufficientFunds) => {
+        Err(err @ StealthTransferApiError::InsufficientFunds { .. }) => {
             log::warn!(
-                "🟡 Insufficient funds detected during transfer creation. Suspending job {} for 30 seconds...",
+                "🟡 Insufficient funds detected during transfer creation. Suspending job {} for 30 seconds... {err}",
                 job.id
             );
             Ok(JobResult::WaitForBalance {
                 resource: params.resource,
-                amount: params.total_spend_amount(),
+                amount: total_spend_amount,
             })
         },
         Err(e) => {
@@ -128,6 +136,7 @@ async fn submit_transfer(
     job: Job,
     sdk: &Sdk,
     transfer: StealthTransferOutput,
+    lock_guard: WalletLockDropGuard<'_, SqliteWalletStore>,
 ) -> Result<JobResult, Error> {
     let transaction = transfer.transaction.authorized_sealed_signer();
     let main_pk = transfer.main_signer.public_key().to_byte_type();
@@ -150,13 +159,10 @@ async fn submit_transfer(
         sdk.local_signer_api()
             .sign(transfer.main_signer.branch, transfer.main_signer.key_id, transaction)?;
 
-    let finalized_wallet_tx = sdk.stealth_transfer_api().unlock_on_failure(
-        transfer.lock_id,
-        context
-            .wallet
-            .submit_transaction(signed_transaction, None, transfer.lock_id)
-            .await,
-    )?;
+    let finalized_wallet_tx = context
+        .wallet
+        .submit_transaction(signed_transaction, None, lock_guard)
+        .await?;
 
     log::info!("Submitted payment transaction with ID: {}", finalized_wallet_tx.id);
     if let Some(reason) = finalized_wallet_tx.finalize.as_ref().and_then(|f| f.reject()) {

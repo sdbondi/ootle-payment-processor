@@ -25,6 +25,8 @@ pub struct Cli {
         env = "SDK_STORE_PATH"
     )]
     pub sdk_store_path: Box<str>,
+    #[arg(short = 'l', long, default_value_t = ([127u8, 0, 0, 1], 13000).into(),  env = "LISTEN_ADDRESS")]
+    pub listen_address: SocketAddr,
     #[arg(long, default_value = "http://18.217.22.26:12500/json_rpc", env = "INDEXER_API_URL")]
     pub indexer_api_url: Url,
     #[arg(long, default_value_t = Network::LocalNet, env = "WALLET_NETWORK")]

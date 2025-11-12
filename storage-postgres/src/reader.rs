@@ -95,7 +95,7 @@ impl ootle_payment_processor_storage::StoreReadTransaction for PostgresReadTrans
         Ok(result.map(|r| r.id))
     }
 
-    async fn count_jobs_with_status(&mut self, status: JobStatus) -> Result<u64, StorageError> {
+    async fn count_jobs_by_status(&mut self, status: JobStatus) -> Result<u64, StorageError> {
         let result = sqlx::query!(
             "SELECT COUNT(*) as count FROM job_queue WHERE status = $1",
             status.as_str()
